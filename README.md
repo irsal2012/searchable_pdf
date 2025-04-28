@@ -1,4 +1,4 @@
-# Searchable PDF Library
+# Searchable PDF
 
 A powerful Python library and API for processing, searching, and extracting data from PDF documents.
 
@@ -21,8 +21,8 @@ A powerful Python library and API for processing, searching, and extracting data
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/searchable-pdf-library.git
-   cd searchable-pdf-library
+   git clone https://github.com/yourusername/searchable-pdf.git
+   cd searchable-pdf
    ```
 
 2. Install dependencies:
