@@ -21,8 +21,8 @@ A powerful Python library and API for processing, searching, and extracting data
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/searchable-pdf.git
-   cd searchable-pdf
+   git clone https://github.com/yourusername/searchable_pdf.git
+   cd searchable_pdf
    ```
 
 2. Install dependencies:
