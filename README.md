@@ -42,7 +42,7 @@ A powerful Python library and API for processing, searching, and extracting data
 Start the API server:
 
 ```
-cd searchable_pdf_library
+cd searchable_pdf
 python main.py
 ```
 
@@ -102,7 +102,7 @@ The API provides the following endpoints:
 ## Project Structure
 
 ```
-searchable_pdf_library/
+searchable_pdf/
 ├── api/                  # API endpoints
 ├── core/                 # Core application logic
 │   ├── document/         # Document processing
