@@ -35,6 +35,15 @@ def main():
         if response.status_code != 200:
             print(f"Error: Upload failed with status code {response.status_code}")
             print(response.text)
+            
+            # Try to get more detailed error information
+            try:
+                error_data = response.json()
+                if 'detail' in error_data:
+                    print(f"Error detail: {error_data['detail']}")
+            except Exception as e:
+                print(f"Could not parse error response: {str(e)}")
+            
             return
         
         # Parse the response

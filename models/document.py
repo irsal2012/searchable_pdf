@@ -25,6 +25,20 @@ class DocumentMetadata(BaseModel):
     path: str
     text_path: Optional[str] = None
     
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary with datetime objects converted to strings.
+        
+        Returns:
+            Dictionary with all datetime objects converted to ISO format strings
+        """
+        data = self.dict()
+        # Convert datetime objects to strings
+        for key, value in data.items():
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+        return data
+    
     class Config:
         schema_extra = {
             "example": {

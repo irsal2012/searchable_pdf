@@ -182,11 +182,7 @@ async def upload_document(
             metadata = pdf_processor.process(file_path, collection)
             
             # Add any warnings to the response
-            metadata_dict = metadata.dict()
-            # Convert datetime objects to strings
-            for key, value in metadata_dict.items():
-                if isinstance(value, datetime):
-                    metadata_dict[key] = value.isoformat()
+            metadata_dict = metadata.to_json_dict()
             
             if pdf_check_result["warnings"]:
                 metadata_dict["warnings"] = pdf_check_result["warnings"]

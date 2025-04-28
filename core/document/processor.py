@@ -11,6 +11,13 @@ import uuid
 from models.document import DocumentMetadata, PageInfo
 from utils import validate_pdf
 
+# Custom JSON encoder that can handle datetime objects
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
 class PDFProcessor:
     """
     Handles the processing of PDF documents, including:
@@ -354,9 +361,8 @@ class PDFProcessor:
             
             # Add or update metadata for this document
             try:
-                # Convert metadata to dict and handle datetime objects
-                metadata_dict = metadata.dict()
-                metadata_dict = self._convert_datetime_to_str(metadata_dict)
+                # Use the to_json_dict method to get a JSON-serializable dictionary
+                metadata_dict = metadata.to_json_dict()
                 all_metadata[metadata.id] = metadata_dict
             except Exception as e:
                 print(f"Error converting metadata to dictionary: {str(e)}")
@@ -389,7 +395,8 @@ class PDFProcessor:
                 # Create a temporary file first to avoid corrupting the metadata file
                 temp_file = self.metadata_file.with_suffix('.json.tmp')
                 with open(temp_file, 'w') as f:
-                    json.dump(all_metadata, f)
+                    # Use the custom JSON encoder to handle datetime objects
+                    json.dump(all_metadata, f, cls=DateTimeEncoder)
                 
                 # Replace the original file with the temporary file
                 temp_file.replace(self.metadata_file)
@@ -399,7 +406,8 @@ class PDFProcessor:
                 # Try a direct approach as a fallback
                 try:
                     with open(self.metadata_file, 'w') as f:
-                        json.dump(all_metadata, f)
+                        # Use the custom JSON encoder to handle datetime objects
+                        json.dump(all_metadata, f, cls=DateTimeEncoder)
                 except Exception as e2:
                     print(f"Error saving metadata file (fallback attempt): {str(e2)}")
                     raise
@@ -641,7 +649,8 @@ class PDFProcessor:
             # Save updated metadata
             try:
                 with open(self.metadata_file, 'w') as f:
-                    json.dump(all_metadata, f)
+                    # Use the custom JSON encoder to handle datetime objects
+                    json.dump(all_metadata, f, cls=DateTimeEncoder)
             except Exception as e:
                 print(f"Error saving metadata after deleting document {document_id}: {str(e)}")
                 return False
