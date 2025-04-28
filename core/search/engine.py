@@ -146,11 +146,11 @@ class SearchEngine:
         
         # Index each document
         for doc in all_docs["documents"]:
-            if doc.indexed:
+            if doc.get('indexed', False):
                 results["skipped"] += 1
                 continue
             
-            success = self.index_document(doc.id)
+            success = self.index_document(doc['id'])
             if success:
                 results["indexed"] += 1
             else:
@@ -224,11 +224,16 @@ class SearchEngine:
             # Prepare search parameters
             searcher = self.index.searcher()
             
-            # Create query parser for content and metadata fields
-            parser = MultifieldParser(["content", "title", "author", "filename"], self.index.schema)
+            # Create a simpler query parser for just the content field
+            parser = QueryParser("content", self.index.schema)
             
             # Parse the query
-            query = parser.parse(query_text)
+            try:
+                query = parser.parse(query_text)
+            except Exception as e:
+                logger.error(f"Error parsing query: {str(e)}")
+                # Use a simple term query as fallback
+                query = Term("content", query_text)
             
             # Apply collection filter if specified
             if collection:
