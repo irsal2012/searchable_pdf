@@ -390,5 +390,78 @@ async def extract_entities(document_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error extracting entities: {str(e)}")
 
+@app.get("/documents/{document_id}/extract/figures")
+async def extract_figures(
+    document_id: str,
+    pages: Optional[str] = None,  # Format: "1,3,5-7"
+    format: str = Query("json", regex="^(json|zip)$"),
+    image_format: str = Query("jpg", regex="^(jpg|png)$")
+):
+    """
+    Extract figures from a document.
+    Optionally specify pages to extract from and output format.
+    """
+    try:
+        # Check if document exists
+        document = pdf_processor.get_document(document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Check if document has images
+        if not document.has_images:
+            # This is just a warning, not an error - we'll still try to extract figures
+            print(f"Warning: Document {document_id} is not marked as having images")
+        
+        try:
+            result = data_extractor.extract_figures(document_id, pages, format, image_format)
+            
+            if format == "json":
+                return result
+            else:
+                # For ZIP, return a file
+                file_path = EXTRACTED_DIR / f"{document_id}_figures.zip"
+                
+                # Check if file exists
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"Generated ZIP file not found at expected location: {file_path}")
+                
+                return FileResponse(
+                    path=file_path,
+                    filename=f"{document_id}_figures.zip",
+                    media_type="application/zip"
+                )
+        except ImportError as e:
+            # Handle missing dependencies
+            raise HTTPException(status_code=500, detail=f"Missing dependency: {str(e)}")
+        except FileNotFoundError as e:
+            # Handle file not found errors
+            raise HTTPException(status_code=500, detail=f"File error: {str(e)}")
+        except ValueError as e:
+            # Handle validation errors
+            raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+        except Exception as e:
+            # Log the full error with traceback for debugging
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error extracting figures from document {document_id}: {str(e)}")
+            print(f"Traceback: {error_trace}")
+            
+            # Return a more helpful error message
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Error extracting figures: {str(e)}. Please check the document format and try again."
+            )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Handle unexpected errors
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Unexpected error in extract_figures endpoint: {str(e)}")
+        print(f"Traceback: {error_trace}")
+        
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

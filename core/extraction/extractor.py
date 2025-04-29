@@ -2,13 +2,15 @@ import os
 import json
 import csv
 import shutil
+import zipfile
+import io
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 import pdfplumber
 
-from models.document import TableInfo
+from models.document import TableInfo, FigureInfo
 from core.document.processor import PDFProcessor
-from utils.imports import HAS_PANDAS, pandas
+from utils.imports import HAS_PANDAS, pandas, HAS_PILLOW, pillow
 
 class DataExtractor:
     """
@@ -308,6 +310,197 @@ class DataExtractor:
             json.dump(form_fields, f)
         
         return form_fields
+    
+    def extract_figures(
+        self, 
+        document_id: str, 
+        pages: Optional[str] = None,
+        output_format: str = "json",
+        image_format: str = "jpg"
+    ) -> Union[List[Dict[str, Any]], str, Path]:
+        """
+        Extract figures from a document, optionally from specific pages.
+        
+        Args:
+            document_id: ID of the document
+            pages: Optional string specifying pages to extract from (e.g., "1,3,5-7")
+            output_format: Format to return figures info in ("json", "zip")
+            image_format: Format to save extracted images ("jpg", "png")
+            
+        Returns:
+            Extracted figures information in the specified format
+        """
+        # Get document metadata
+        doc_metadata = self.pdf_processor.get_document(document_id)
+        if not doc_metadata:
+            raise ValueError(f"Document not found: {document_id}")
+        
+        # Parse page specification
+        page_numbers = self._parse_page_spec(pages, doc_metadata.page_count) if pages else None
+        
+        # Extract figures
+        file_path = Path(doc_metadata.path)
+        if not file_path.exists():
+            raise ValueError(f"PDF file not found: {file_path}")
+        
+        # Create directory for extracted figures
+        doc_extract_dir = self.extracted_dir / document_id
+        doc_extract_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create a figures directory
+        figures_dir = doc_extract_dir / "figures"
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract figures from the PDF
+        figures_data = []
+        figure_infos = []
+        extraction_errors = []
+        
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                # If no specific pages requested, process all pages
+                if not page_numbers:
+                    page_numbers = list(range(len(pdf.pages)))
+                
+                for page_idx in page_numbers:
+                    if 0 <= page_idx < len(pdf.pages):
+                        page = pdf.pages[page_idx]
+                        
+                        try:
+                            # Get images from the page
+                            images = page.images
+                            
+                            for img_idx, img in enumerate(images):
+                                try:
+                                    # Extract image data
+                                    img_bbox = [img['x0'], img['top'], img['x1'], img['bottom']]
+                                    img_width = int(img['width'])
+                                    img_height = int(img['height'])
+                                    
+                                    # Generate a filename for the image
+                                    img_filename = f"figure_{page_idx + 1}_{img_idx + 1}.{image_format}"
+                                    img_path = figures_dir / img_filename
+                                    
+                                    # Save the image
+                                    img_data = img['stream'].get_data()
+                                    
+                                    # Process image with Pillow if available
+                                    if HAS_PILLOW:
+                                        try:
+                                            # Open image from bytes
+                                            from PIL import Image
+                                            img_obj = Image.open(io.BytesIO(img_data))
+                                            
+                                            # Convert to RGB if needed
+                                            if img_obj.mode != 'RGB' and image_format.lower() == 'jpg':
+                                                img_obj = img_obj.convert('RGB')
+                                            
+                                            # Save in the requested format
+                                            img_obj.save(img_path)
+                                        except Exception as e:
+                                            print(f"Warning: Error processing image with Pillow: {str(e)}")
+                                            # Fallback: save raw image data
+                                            with open(img_path, 'wb') as f:
+                                                f.write(img_data)
+                                    else:
+                                        # Save raw image data
+                                        with open(img_path, 'wb') as f:
+                                            f.write(img_data)
+                                    
+                                    # Create figure info
+                                    figure_info = FigureInfo(
+                                        document_id=document_id,
+                                        page_number=page_idx + 1,
+                                        figure_number=img_idx + 1,
+                                        width=img_width,
+                                        height=img_height,
+                                        bbox=img_bbox,
+                                        format=image_format,
+                                        filename=img_filename
+                                    )
+                                    figure_infos.append(figure_info)
+                                    
+                                    # Add figure to results
+                                    figures_data.append({
+                                        "page": page_idx + 1,
+                                        "figure": img_idx + 1,
+                                        "width": img_width,
+                                        "height": img_height,
+                                        "bbox": img_bbox,
+                                        "format": image_format,
+                                        "filename": img_filename,
+                                        "url": f"/files/extracted/{document_id}/figures/{img_filename}"
+                                    })
+                                except Exception as e:
+                                    error_msg = f"Error extracting figure {img_idx + 1} from page {page_idx + 1}: {str(e)}"
+                                    print(error_msg)
+                                    extraction_errors.append(error_msg)
+                                    continue
+                        
+                        except Exception as e:
+                            error_msg = f"Error extracting figures from page {page_idx + 1}: {str(e)}"
+                            print(error_msg)
+                            extraction_errors.append(error_msg)
+                            continue
+            
+            # If no figures were found and there were errors, raise an exception
+            if not figures_data and extraction_errors:
+                raise ValueError(f"Failed to extract any figures. Errors: {'; '.join(extraction_errors)}")
+            
+            # If no figures were found but no errors occurred, it might just be that there are no figures
+            if not figures_data:
+                print(f"No figures found in document {document_id}")
+                
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error during figure extraction: {str(e)}")
+            print(f"Traceback: {error_trace}")
+            raise ValueError(f"Figure extraction failed: {str(e)}")
+        
+        # Save figure information
+        figures_dict = [figure.dict() for figure in figure_infos]
+        # Convert datetime objects to strings
+        figures_dict = self.pdf_processor._convert_datetime_to_str(figures_dict)
+        with open(doc_extract_dir / "figures_info.json", 'w') as f:
+            json.dump(figures_dict, f)
+        
+        # Return figures in the requested format
+        if output_format == "json":
+            # Return JSON data directly
+            return figures_data if figures_data else []
+        
+        elif output_format == "zip":
+            # Create a ZIP file containing all figures
+            zip_file = doc_extract_dir / "figures.zip"
+            api_zip_file = self.extracted_dir / f"{document_id}_figures.zip"
+            
+            try:
+                with zipfile.ZipFile(zip_file, 'w') as zf:
+                    # Add each figure to the ZIP
+                    for figure_info in figure_infos:
+                        img_path = figures_dir / figure_info.filename
+                        if img_path.exists():
+                            zf.write(img_path, figure_info.filename)
+                    
+                    # Add metadata JSON
+                    metadata_json = json.dumps(figures_dict, indent=2)
+                    zf.writestr("figures_info.json", metadata_json)
+                
+                # Copy the file to the API-expected location
+                try:
+                    shutil.copy2(zip_file, api_zip_file)
+                except Exception as e:
+                    print(f"Warning: Could not copy ZIP file to API location: {str(e)}")
+                
+                return api_zip_file
+            
+            except Exception as e:
+                print(f"Error creating ZIP file: {str(e)}")
+                raise ValueError(f"Error creating ZIP file: {str(e)}")
+        
+        else:
+            raise ValueError(f"Unsupported output format: {output_format}")
     
     def _parse_page_spec(self, page_spec: str, max_pages: int) -> List[int]:
         """

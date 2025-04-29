@@ -147,6 +147,9 @@
                                 <button class="nav-link" id="tables-tab" data-bs-toggle="tab" data-bs-target="#tables" type="button" role="tab" aria-controls="tables" aria-selected="false">Tables</button>
                             </li>
                             <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="figures-tab" data-bs-toggle="tab" data-bs-target="#figures" type="button" role="tab" aria-controls="figures" aria-selected="false">Figures</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab" aria-controls="summary" aria-selected="false">Summary</button>
                             </li>
                             <li class="nav-item" role="presentation">
@@ -191,6 +194,24 @@
                                     </div>
                                 </div>
                                 <div id="documentSummary" class="border p-3 bg-light"></div>
+                            </div>
+                            <div class="tab-pane fade" id="figures" role="tabpanel" aria-labelledby="figures-tab">
+                                <div class="mb-3">
+                                    <label for="figurePageRange" class="form-label">Pages (e.g., "1,3,5-7")</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="figurePageRange" placeholder="All pages">
+                                        <select class="form-select" id="figureFormat" style="max-width: 120px;">
+                                            <option value="json">JSON</option>
+                                            <option value="zip">ZIP</option>
+                                        </select>
+                                        <select class="form-select" id="imageFormat" style="max-width: 120px;">
+                                            <option value="jpg">JPG</option>
+                                            <option value="png">PNG</option>
+                                        </select>
+                                        <button class="btn btn-outline-secondary" type="button" id="extractFigures">Extract</button>
+                                    </div>
+                                </div>
+                                <div id="documentFigures" class="row"></div>
                             </div>
                             <div class="tab-pane fade" id="entities" role="tabpanel" aria-labelledby="entities-tab">
                                 <button class="btn btn-outline-secondary mb-3" type="button" id="extractEntities">Extract Entities</button>
@@ -261,6 +282,10 @@
             
             document.getElementById('generateSummary').addEventListener('click', function() {
                 generateSummary();
+            });
+            
+            document.getElementById('extractFigures').addEventListener('click', function() {
+                extractFigures();
             });
             
             document.getElementById('extractEntities').addEventListener('click', function() {
@@ -525,6 +550,7 @@
             document.getElementById('documentMetadata').innerHTML = 'Loading...';
             document.getElementById('documentText').innerHTML = '';
             document.getElementById('documentTables').innerHTML = '';
+            document.getElementById('documentFigures').innerHTML = '';
             document.getElementById('documentSummary').innerHTML = '';
             document.getElementById('documentEntities').innerHTML = '';
             
@@ -821,6 +847,92 @@
             })
             .catch(error => {
                 alert(`Error deleting document: ${error.message}`);
+            });
+        }
+        
+        // Extract figures from document
+        function extractFigures() {
+            const pageRange = document.getElementById('figurePageRange').value;
+            const format = document.getElementById('figureFormat').value;
+            const imageFormat = document.getElementById('imageFormat').value;
+            const documentFigures = document.getElementById('documentFigures');
+            
+            documentFigures.innerHTML = 'Extracting figures...';
+            
+            let url = `${API_BASE_URL}/documents/${currentDocumentId}/extract/figures?format=${format}&image_format=${imageFormat}`;
+            if (pageRange) {
+                url += `&pages=${encodeURIComponent(pageRange)}`;
+            }
+            
+            fetch(url)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                
+                if (format === 'json') {
+                    return response.json();
+                } else {
+                    // For ZIP, show download link
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `figures.zip`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        return { download: true, format: format };
+                    });
+                }
+            })
+            .then(data => {
+                if (data.download) {
+                    documentFigures.innerHTML = `<p>Figures downloaded as ${data.format.toUpperCase()}</p>`;
+                    return;
+                }
+                
+                if (data.length === 0) {
+                    documentFigures.innerHTML = '<p>No figures found in the document</p>';
+                    return;
+                }
+                
+                documentFigures.innerHTML = '';
+                
+                // Display figures
+                data.forEach((figure, index) => {
+                    const figureCol = document.createElement('div');
+                    figureCol.className = 'col-md-4 mb-4';
+                    
+                    const figureCard = document.createElement('div');
+                    figureCard.className = 'card';
+                    
+                    // Create figure image
+                    const img = document.createElement('img');
+                    img.className = 'card-img-top';
+                    img.src = `${API_BASE_URL}${figure.url}`;
+                    img.alt = `Figure ${figure.figure} from page ${figure.page}`;
+                    
+                    // Create figure info
+                    const cardBody = document.createElement('div');
+                    cardBody.className = 'card-body';
+                    cardBody.innerHTML = `
+                        <h5 class="card-title">Figure ${figure.figure}</h5>
+                        <p class="card-text">
+                            Page: ${figure.page}<br>
+                            Size: ${figure.width}x${figure.height}
+                        </p>
+                        <a href="${API_BASE_URL}${figure.url}" class="btn btn-sm btn-primary" target="_blank">View Full Size</a>
+                    `;
+                    
+                    figureCard.appendChild(img);
+                    figureCard.appendChild(cardBody);
+                    figureCol.appendChild(figureCard);
+                    documentFigures.appendChild(figureCol);
+                });
+            })
+            .catch(error => {
+                documentFigures.innerHTML = `<p>Error extracting figures: ${error.message}</p>`;
             });
         }
         

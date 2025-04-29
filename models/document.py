@@ -110,6 +110,33 @@ class TableInfo(BaseModel):
             }
         }
 
+class FigureInfo(BaseModel):
+    """
+    Information about a figure extracted from a PDF document.
+    """
+    document_id: str
+    page_number: int
+    figure_number: int
+    width: int
+    height: int
+    bbox: List[float]  # [x0, y0, x1, y1]
+    format: str  # "jpg", "png", etc.
+    filename: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "document_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+                "page_number": 2,
+                "figure_number": 1,
+                "width": 500,
+                "height": 300,
+                "bbox": [100.0, 200.0, 600.0, 500.0],
+                "format": "jpg",
+                "filename": "figure_2_1.jpg"
+            }
+        }
+
 class SearchQuery(BaseModel):
     """
     Query parameters for searching documents.
