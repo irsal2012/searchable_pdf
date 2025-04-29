@@ -307,20 +307,66 @@ async def extract_tables(
     Optionally specify pages to extract from and output format.
     """
     try:
-        result = data_extractor.extract_tables(document_id, pages, format)
+        # Check if document exists
+        document = pdf_processor.get_document(document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
         
-        if format == "json":
-            return result
-        else:
-            # For CSV or Excel, return a file
-            file_path = EXTRACTED_DIR / f"{document_id}_tables.{format}"
-            return FileResponse(
-                path=file_path,
-                filename=f"{document_id}_tables.{format}",
-                media_type="application/octet-stream"
+        # Check if document has tables
+        if not document.has_tables:
+            # This is just a warning, not an error - we'll still try to extract tables
+            print(f"Warning: Document {document_id} is not marked as having tables")
+        
+        try:
+            result = data_extractor.extract_tables(document_id, pages, format)
+            
+            if format == "json":
+                return result
+            else:
+                # For CSV or Excel, return a file
+                file_path = EXTRACTED_DIR / f"{document_id}_tables.{format}"
+                
+                # Check if file exists
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"Generated {format} file not found at expected location: {file_path}")
+                
+                return FileResponse(
+                    path=file_path,
+                    filename=f"{document_id}_tables.{format}",
+                    media_type="application/octet-stream"
+                )
+        except ImportError as e:
+            # Handle missing dependencies
+            raise HTTPException(status_code=500, detail=f"Missing dependency: {str(e)}")
+        except FileNotFoundError as e:
+            # Handle file not found errors
+            raise HTTPException(status_code=500, detail=f"File error: {str(e)}")
+        except ValueError as e:
+            # Handle validation errors
+            raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+        except Exception as e:
+            # Log the full error with traceback for debugging
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error extracting tables from document {document_id}: {str(e)}")
+            print(f"Traceback: {error_trace}")
+            
+            # Return a more helpful error message
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Error extracting tables: {str(e)}. Please check the document format and try again."
             )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error extracting tables: {str(e)}")
+        # Handle unexpected errors
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Unexpected error in extract_tables endpoint: {str(e)}")
+        print(f"Traceback: {error_trace}")
+        
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @app.get("/documents/{document_id}/analyze/summary")
 async def generate_summary(document_id: str, max_length: int = Query(500, ge=100, le=2000)):

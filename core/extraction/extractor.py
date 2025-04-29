@@ -1,6 +1,7 @@
 import os
 import json
 import csv
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 import pdfplumber
@@ -104,51 +105,91 @@ class DataExtractor:
         # Extract tables from the PDF
         tables_data = []
         table_infos = []
+        extraction_errors = []
         
-        with pdfplumber.open(file_path) as pdf:
-            # If no specific pages requested, process all pages
-            if not page_numbers:
-                page_numbers = list(range(len(pdf.pages)))
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                # If no specific pages requested, process all pages
+                if not page_numbers:
+                    page_numbers = list(range(len(pdf.pages)))
+                
+                for page_idx in page_numbers:
+                    if 0 <= page_idx < len(pdf.pages):
+                        page = pdf.pages[page_idx]
+                        
+                        # Try different table extraction methods
+                        try:
+                            # Method 1: Standard table extraction
+                            tables = page.extract_tables()
+                            
+                            if not tables:
+                                # Method 2: Try with different settings
+                                tables = page.find_tables(
+                                    table_settings={
+                                        "vertical_strategy": "text",
+                                        "horizontal_strategy": "text",
+                                        "intersection_tolerance": 5
+                                    }
+                                )
+                                if tables:
+                                    tables = [table.extract() for table in tables]
+                            
+                            # Process extracted tables
+                            for table_idx, table in enumerate(tables):
+                                # Convert table to a list of dictionaries
+                                if table and len(table) > 1:  # Ensure there's at least a header row and one data row
+                                    headers = [str(cell).strip() if cell else f"Column{i+1}" for i, cell in enumerate(table[0])]
+                                    
+                                    # Create table info
+                                    table_info = TableInfo(
+                                        document_id=document_id,
+                                        page_number=page_idx + 1,
+                                        table_number=table_idx + 1,
+                                        rows=len(table),
+                                        columns=len(headers),
+                                        bbox=[0, 0, 0, 0]  # Placeholder
+                                    )
+                                    table_infos.append(table_info)
+                                    
+                                    # Process table rows
+                                    table_rows = []
+                                    for row_idx, row in enumerate(table[1:], 1):  # Skip header row
+                                        row_dict = {}
+                                        for col_idx, cell in enumerate(row):
+                                            if col_idx < len(headers):
+                                                header = headers[col_idx]
+                                                row_dict[header] = cell.strip() if cell else ""
+                                        
+                                        table_rows.append(row_dict)
+                                    
+                                    # Add table to results
+                                    tables_data.append({
+                                        "page": page_idx + 1,
+                                        "table": table_idx + 1,
+                                        "headers": headers,
+                                        "rows": table_rows
+                                    })
+                        
+                        except Exception as e:
+                            error_msg = f"Error extracting tables from page {page_idx + 1}: {str(e)}"
+                            print(error_msg)
+                            extraction_errors.append(error_msg)
+                            continue
             
-            for page_idx in page_numbers:
-                if 0 <= page_idx < len(pdf.pages):
-                    page = pdf.pages[page_idx]
-                    tables = page.extract_tables()
-                    
-                    for table_idx, table in enumerate(tables):
-                        # Convert table to a list of dictionaries
-                        if table and len(table) > 1:  # Ensure there's at least a header row and one data row
-                            headers = [str(cell).strip() if cell else f"Column{i+1}" for i, cell in enumerate(table[0])]
-                            
-                            # Create table info
-                            table_info = TableInfo(
-                                document_id=document_id,
-                                page_number=page_idx + 1,
-                                table_number=table_idx + 1,
-                                rows=len(table),
-                                columns=len(headers),
-                                bbox=[0, 0, 0, 0]  # Placeholder
-                            )
-                            table_infos.append(table_info)
-                            
-                            # Process table rows
-                            table_rows = []
-                            for row_idx, row in enumerate(table[1:], 1):  # Skip header row
-                                row_dict = {}
-                                for col_idx, cell in enumerate(row):
-                                    if col_idx < len(headers):
-                                        header = headers[col_idx]
-                                        row_dict[header] = cell.strip() if cell else ""
-                                
-                                table_rows.append(row_dict)
-                            
-                            # Add table to results
-                            tables_data.append({
-                                "page": page_idx + 1,
-                                "table": table_idx + 1,
-                                "headers": headers,
-                                "rows": table_rows
-                            })
+            # If no tables were found and there were errors, raise an exception
+            if not tables_data and extraction_errors:
+                raise ValueError(f"Failed to extract any tables. Errors: {'; '.join(extraction_errors)}")
+            
+            # If no tables were found but no errors occurred, it might just be that there are no tables
+            if not tables_data:
+                print(f"No tables found in document {document_id}")
+                
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error during table extraction: {str(e)}")
+            print(f"Traceback: {error_trace}")
+            raise ValueError(f"Table extraction failed: {str(e)}")
         
         # Save table information
         tables_dict = [table.dict() for table in table_infos]
@@ -160,36 +201,74 @@ class DataExtractor:
         # Return tables in the requested format
         if output_format == "json":
             # Return JSON data directly
-            return tables_data
+            return tables_data if tables_data else []
         
         elif output_format == "csv":
             # Convert to CSV
             csv_file = doc_extract_dir / "tables.csv"
+            # Also create a file with the naming convention expected by the API endpoint
+            api_csv_file = self.extracted_dir / f"{document_id}_tables.csv"
             
             with open(csv_file, 'w', newline='') as f:
-                for table_data in tables_data:
-                    writer = csv.DictWriter(f, fieldnames=table_data["headers"])
-                    f.write(f"Page {table_data['page']}, Table {table_data['table']}\n")
-                    writer.writeheader()
-                    writer.writerows(table_data["rows"])
-                    f.write("\n\n")
+                if tables_data:
+                    for table_data in tables_data:
+                        writer = csv.DictWriter(f, fieldnames=table_data["headers"])
+                        f.write(f"Page {table_data['page']}, Table {table_data['table']}\n")
+                        writer.writeheader()
+                        writer.writerows(table_data["rows"])
+                        f.write("\n\n")
+                else:
+                    # Create an empty CSV with a note
+                    f.write("No tables found in the document.\n")
             
-            return csv_file
+            # Copy the file to the API-expected location
+            try:
+                shutil.copy2(csv_file, api_csv_file)
+            except Exception as e:
+                print(f"Warning: Could not copy CSV file to API location: {str(e)}")
+                # Try to create the file directly at the API location
+                try:
+                    with open(api_csv_file, 'w', newline='') as f:
+                        f.write("No tables found in the document.\n")
+                except Exception as e2:
+                    print(f"Error creating CSV file at API location: {str(e2)}")
+            
+            return api_csv_file
         
         elif output_format == "excel":
             # Convert to Excel
             excel_file = doc_extract_dir / "tables.xlsx"
+            # Also create a file with the naming convention expected by the API endpoint
+            api_excel_file = self.extracted_dir / f"{document_id}_tables.xlsx"
             
             if not HAS_PANDAS:
                 raise ImportError("pandas is required for Excel output. Please install pandas: pip install pandas")
             
             with pandas.ExcelWriter(excel_file) as writer:
-                for table_data in tables_data:
-                    df = pandas.DataFrame(table_data["rows"])
-                    sheet_name = f"P{table_data['page']}_T{table_data['table']}"
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                if tables_data:
+                    for table_data in tables_data:
+                        df = pandas.DataFrame(table_data["rows"])
+                        sheet_name = f"P{table_data['page']}_T{table_data['table']}"
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                else:
+                    # Create an empty Excel file with a note
+                    df = pandas.DataFrame({"Note": ["No tables found in the document."]})
+                    df.to_excel(writer, sheet_name="Info", index=False)
             
-            return excel_file
+            # Copy the file to the API-expected location
+            try:
+                shutil.copy2(excel_file, api_excel_file)
+            except Exception as e:
+                print(f"Warning: Could not copy Excel file to API location: {str(e)}")
+                # Try to create the file directly at the API location
+                try:
+                    with pandas.ExcelWriter(api_excel_file) as writer:
+                        df = pandas.DataFrame({"Note": ["No tables found in the document."]})
+                        df.to_excel(writer, sheet_name="Info", index=False)
+                except Exception as e2:
+                    print(f"Error creating Excel file at API location: {str(e2)}")
+            
+            return api_excel_file
         
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
