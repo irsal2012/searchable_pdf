@@ -16,6 +16,7 @@ from core.document.processor import PDFProcessor
 from core.search.engine import SearchEngine
 from core.extraction.extractor import DataExtractor
 from core.analytics.analyzer import ContentAnalyzer
+from core.translation.translator import TranslationService
 from models.document import DocumentMetadata, SearchQuery, SearchResult
 
 # Create FastAPI app
@@ -47,6 +48,7 @@ pdf_processor = PDFProcessor()
 search_engine = SearchEngine()
 data_extractor = DataExtractor()
 content_analyzer = ContentAnalyzer()
+translation_service = TranslationService()
 
 # Mount static files directories
 app.mount("/files", StaticFiles(directory="storage"), name="storage")
@@ -389,6 +391,87 @@ async def extract_entities(document_id: str):
         return {"document_id": document_id, "entities": entities}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error extracting entities: {str(e)}")
+
+@app.get("/documents/{document_id}/translate")
+async def translate_document(
+    document_id: str,
+    target_language: str = Query("en", regex="^[a-z]{2}$"),
+    source_language: Optional[str] = Query(None, regex="^[a-z]{2}$")
+):
+    """
+    Translate a document to the target language.
+    """
+    try:
+        result = translation_service.translate_document(
+            document_id, 
+            target_language,
+            source_language
+        )
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error translating document: {str(e)}")
+
+@app.get("/documents/{document_id}/translate/pages")
+async def translate_document_pages(
+    document_id: str,
+    target_language: str = Query("en", regex="^[a-z]{2}$"),
+    pages: Optional[str] = None,
+    source_language: Optional[str] = Query(None, regex="^[a-z]{2}$")
+):
+    """
+    Translate specific pages of a document to the target language.
+    """
+    try:
+        result = translation_service.translate_document_pages(
+            document_id, 
+            target_language,
+            pages,
+            source_language
+        )
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error translating document pages: {str(e)}")
+
+@app.post("/translate/text")
+async def translate_text(
+    request: Request,
+    target_language: str = Query("en", regex="^[a-z]{2}$"),
+    source_language: Optional[str] = Query(None, regex="^[a-z]{2}$")
+):
+    """
+    Translate arbitrary text to the target language.
+    """
+    try:
+        data = await request.json()
+        text = data.get("text", "")
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="No text provided")
+        
+        translated_text = translation_service.translate_text(
+            text,
+            target_language,
+            source_language
+        )
+        
+        return {
+            "source_language": source_language or translation_service.detect_language(text),
+            "target_language": target_language,
+            "original_text": text,
+            "translated_text": translated_text
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error translating text: {str(e)}")
 
 @app.get("/documents/{document_id}/extract/figures")
 async def extract_figures(

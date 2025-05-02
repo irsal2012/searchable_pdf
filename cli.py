@@ -16,6 +16,7 @@ from core.document.processor import PDFProcessor
 from core.search.engine import SearchEngine
 from core.extraction.extractor import DataExtractor
 from core.analytics.analyzer import ContentAnalyzer
+from core.translation.translator import TranslationService
 
 def main():
     """Main entry point for the CLI."""
@@ -72,6 +73,14 @@ def main():
     entities_parser.add_argument("id", help="Document ID")
     entities_parser.add_argument("--output", help="Output file path")
     
+    # Translate command
+    translate_parser = subparsers.add_parser("translate", help="Translate a document to a different language")
+    translate_parser.add_argument("id", help="Document ID")
+    translate_parser.add_argument("--target-language", default="en", help="Target language code (e.g., 'es' for Spanish)")
+    translate_parser.add_argument("--source-language", help="Source language code (auto-detected if not provided)")
+    translate_parser.add_argument("--pages", help="Pages to translate (e.g., '1,3,5-7')")
+    translate_parser.add_argument("--output", help="Output file path")
+    
     # Index command
     index_parser = subparsers.add_parser("index", help="Index documents for searching")
     index_parser.add_argument("--rebuild", action="store_true", help="Rebuild the entire index")
@@ -84,6 +93,7 @@ def main():
     search_engine = SearchEngine()
     data_extractor = DataExtractor()
     content_analyzer = ContentAnalyzer()
+    translation_service = TranslationService()
     
     # Execute command
     if args.command == "upload":
@@ -104,6 +114,8 @@ def main():
         summarize_document(args, content_analyzer)
     elif args.command == "entities":
         extract_entities(args, content_analyzer)
+    elif args.command == "translate":
+        translate_document(args, translation_service)
     elif args.command == "index":
         index_documents(args, search_engine)
     else:
@@ -283,6 +295,82 @@ def extract_entities(args, content_analyzer):
                 print(f"{entity.text} ({entity.label}): {entity.count} occurrences")
     except Exception as e:
         print(f"Error extracting entities: {str(e)}")
+
+def translate_document(args, translation_service):
+    """Translate a document to a different language."""
+    try:
+        if args.pages:
+            # Translate specific pages
+            result = translation_service.translate_document_pages(
+                args.id, 
+                args.target_language,
+                args.pages,
+                args.source_language
+            )
+            
+            if "error" in result:
+                print(f"Error: {result['error']}")
+                return
+            
+            print(f"Translated {result['page_count']} pages to {result['target_language']}")
+            
+            if args.output:
+                # Combine all page translations
+                all_text = []
+                for page_num, translation in sorted(result["translations"].items()):
+                    all_text.append(f"--- Page {page_num} ---\n{translation['translated_text']}")
+                
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write("\n\n".join(all_text))
+                print(f"Translation saved to {args.output}")
+            else:
+                # Print a preview of each page
+                for page_num, translation in sorted(result["translations"].items()):
+                    source_lang = translation.get("source_language", "unknown")
+                    print(f"\nPage {page_num} (from {source_lang} to {result['target_language']}):")
+                    
+                    if translation.get("cached", False):
+                        print("(Loaded from cache)")
+                    elif translation.get("skipped", False):
+                        print("(Translation skipped - already in target language)")
+                    
+                    # Print a preview
+                    preview_length = 100
+                    text = translation["translated_text"]
+                    preview = text[:preview_length] + ("..." if len(text) > preview_length else "")
+                    print(preview)
+        else:
+            # Translate entire document
+            result = translation_service.translate_document(
+                args.id, 
+                args.target_language,
+                args.source_language
+            )
+            
+            if "error" in result:
+                print(f"Error: {result['error']}")
+                return
+            
+            print(f"Document translated from {result['source_language']} to {result['target_language']}")
+            
+            if result.get("cached", False):
+                print("(Translation loaded from cache)")
+            elif result.get("skipped", False):
+                print("(Translation skipped - document already in target language)")
+            
+            if args.output:
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(result["translated_text"])
+                print(f"Translation saved to {args.output}")
+            else:
+                # Print a preview
+                preview_length = 500
+                text = result["translated_text"]
+                preview = text[:preview_length] + ("..." if len(text) > preview_length else "")
+                print("\nPreview:")
+                print(preview)
+    except Exception as e:
+        print(f"Error translating document: {str(e)}")
 
 def index_documents(args, search_engine):
     """Index documents for searching."""
